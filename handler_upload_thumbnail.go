@@ -65,8 +65,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	assetPath := getAssetPath(videoID, mediaType)
+	
+
+	assetPath := getAssetPath(mediaType)
+
 	assetDiskPath := cfg.getAssetDiskPath(assetPath)
+
 
 	destinationFile, err := os.Create(assetDiskPath)
 	if err != nil {
@@ -92,6 +96,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	url := cfg.getAssetURL(assetPath)
+	fmt.Printf("Url: %s", url)
 	video.ThumbnailURL = &url
 	
 	err = cfg.db.UpdateVideo(video)
