@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
-	"github.com/google/uuid"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -24,12 +23,12 @@ type apiConfig struct {
 	port             string
 }
 
-type thumbnail struct {
-	data      []byte
-	mediaType string
-}
+// type thumbnail struct {
+// 	data      []byte
+// 	mediaType string
+// }
 
-var videoThumbnails = map[uuid.UUID]thumbnail{}
+// var videoThumbnails = map[uuid.UUID]thumbnail{}
 
 func main() {
 	godotenv.Load(".env")
@@ -105,7 +104,7 @@ func main() {
 	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
 	mux.Handle("/app/", appHandler)
 
-	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
+	assetsHandler := http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsRoot)))
 	mux.Handle("/assets/", cacheMiddleware(assetsHandler))
 
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
@@ -119,6 +118,7 @@ func main() {
 	mux.HandleFunc("POST /api/video_upload/{videoID}", cfg.handlerUploadVideo)
 	mux.HandleFunc("GET /api/videos", cfg.handlerVideosRetrieve)
 	mux.HandleFunc("DELETE /api/videos/{videoID}", cfg.handlerVideoMetaDelete)
+	mux.HandleFunc("GET /api/videos/{videoID}", cfg.handlerVideoGet)
 
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 
