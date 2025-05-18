@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -33,11 +30,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
-
-	// TODO: implement the upload here
-	const maxMemory = 10 << 20 
+	// Implement the upload with 10 MB
+	const maxMemory = 10 << 20  
 	err = r.ParseMultipartForm(maxMemory)
 	if err != nil {
 		respondWithError(w, 500, "error passing max memory", err)
@@ -55,14 +49,22 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		// Read all the image data into a byte slice using io.ReadAll 
 	mediaType := header.Header.Get("Content-Type")
 	if mediaType == "" {
-		respondWithError(w, http.StatusBadRequest, "Unable to get mediaType", fmt.Errorf("no content type"))
+		respondWithError(w, http.StatusBadRequest, "Unable to get mediaType", nil)
 		return
 	}
 
-	imageData, err := io.ReadAll(file)
+	assetPath := getAssetPath(videoID, mediaType)
+	assetDiskPath := cfg.getAssetDiskPath(assetPath)
+
+	destinationFile, err := os.Create(assetDiskPath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to parse form file", err)
-		return
+		respondWithError(w, http.StatusInternalServerError, "Unable to create file on server", err)
+	}
+
+	defer destinationFile.Close()
+
+	if _, err = io.Copy(destinationFile, file); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
 	}
 
 	video, err := cfg.db.GetVideo(videoID)
@@ -77,29 +79,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fields := strings.Split(mediaType, "/")
-	imageType := fmt.Sprintf(`%s`, fields[1]) 
-
-	// path shape: /assets/videoId.fileExtension 
-	fileExtension := fmt.Sprintf(`.%s`, imageType)
-	fmt.Printf(`File extension: %s\n`, fileExtension)
-	
-	mediaPath := filepath.Join(cfg.assetsRoot, videoIDString + fileExtension)
-	fmt.Printf(`Media path: %s.\n`, mediaPath)
-	destFile, error := os.Create(mediaPath)
-	
-	if error != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to get create file", err)
-		return
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, bytes.NewReader(imageData))
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to copy file", err)
-	}
-
-	url := fmt.Sprintf(`/assets/%s%s`, videoIDString, fileExtension) 
+	url := cfg.getAssetURL(assetPath)
 	video.ThumbnailURL = &url
 	
 	err = cfg.db.UpdateVideo(video)
