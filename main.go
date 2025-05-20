@@ -5,6 +5,11 @@ import (
 	"net/http"
 	"os"
 
+	"context"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
 	"github.com/joho/godotenv"
@@ -21,14 +26,10 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
+	s3Client				*s3.Client
+
 }
 
-// type thumbnail struct {
-// 	data      []byte
-// 	mediaType string
-// }
-
-// var videoThumbnails = map[uuid.UUID]thumbnail{}
 
 func main() {
 	godotenv.Load(".env")
@@ -99,6 +100,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("Couldn't create assets directory: %v", err)
 	}
+
+	awsCfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithRegion(cfg.s3Region),
+	)
+	if err != nil {
+		log.Fatal("Unable to load SDK config: %v", err)
+	}
+
+	cfg.s3Client = s3.NewFromConfig(awsCfg)
 
 	mux := http.NewServeMux()
 	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
