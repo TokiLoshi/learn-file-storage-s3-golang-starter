@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -94,11 +99,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 
 	// 7 - Save the uploaded file as a temporay file on dis 
-	// use os.CreatedTemp to create temp file 
-	// pass empty string for directory to use the system default 
-	// use name "tubely-upload.mp4" 
-	// defer remove temp file with os.Remove
-	// defer close temp file 
 	tempFile, err := os.CreateTemp("", "tubely-upload.mp4")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create temporary file: %v", err)
@@ -120,19 +120,33 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't reset the temp file: %v", err)
 		return
 	}
+
+	fileName := tempFile.Name()
+	fmt.Printf("Filename: %v", fileName)
+
+	aspectRatio, err := getVideoAspectRatio(fileName)
+	fmt.Printf("Aspect ratio: %v", aspectRatio)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v", err)
+		return
+	}
+
+	orientation := "other"
+	if aspectRatio == "16:9" {
+		orientation = "landscape"
+	} else if aspectRatio == "9:16" {
+		orientation = "portrait"
+	}
 	
 	// 9 - Put object into S3 using PutObject 
-		// provide the bucket name 
-	// provide same <random-32-byte-hex>.ext format as key e.g 32523423.mp4
-	// provide the file content (body) the temp file is an os.File which implements io.Reader
-	// provide the content type which is the MIME type of file 
 	randomBytes := make([]byte, 16)
 	_, err = rand.Read(randomBytes)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v", err)
 		return
 	}
-	fileKey := fmt.Sprintf("%x.mp4", randomBytes)
+	fileKey := fmt.Sprintf("%v/%x.mp4", orientation, randomBytes)
 	
 	putObject := &s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
@@ -162,4 +176,50 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	respondWithJSON(w, http.StatusOK, struct{}{})
 	// 11 - restart server and test handler by uploading boots-video-vertical.mp4
 	// ensure video is uploaded to s3 bucket with key and shows up in webUI
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	type streams struct {
+		Width int `json:"width"`
+		Height int `json:"height"`
+	}
+
+	type FFProbeOutput struct {
+		Streams []streams `json:"streams"`
+	}
+
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+
+	var buffer bytes.Buffer
+
+	cmd.Stdout = &buffer 
+
+	err := cmd.Run()
+	if err != nil {
+		log.Fatalf("Error running command!: %v", err)
+	}
+
+	fmt.Printf("Buffer: %v", buffer)
+
+	var output FFProbeOutput 
+
+	err = json.Unmarshal(buffer.Bytes(), &output)
+	if err != nil {
+		log.Fatalf("Error unmarshalling json data: %v", err)
+	}
+
+	width := output.Streams[0].Width 
+	height := output.Streams[0].Height
+
+	aspectRatio := float64(width) / float64(height)
+	
+	heightByWidth := math.Abs(aspectRatio -(16.0 / 9.0))
+	if heightByWidth < 0.01 {
+		return "16:9", nil
+	}
+	widthByHeight := math.Abs(aspectRatio -(9.0 / 16.0))
+	if widthByHeight < 0.01 {
+		return "9:16", nil
+	}
+	return "other", nil
 }
