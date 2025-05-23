@@ -26,7 +26,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	fmt.Println("Request url: ", r.URL.Path)
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid ID", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid ID\n", err)
 		return
 	}
 	fmt.Printf("Video ID: %v", videoID)
@@ -34,13 +34,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		// 3 - AUthenticate user to get userID
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
+		respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT\n", err)
 		return
 	}
 
 	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT\n", err)
 		return 
 	}
 
@@ -49,7 +49,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	const maxMemory = 32 << 20
 	err = r.ParseMultipartForm(maxMemory)
 	if err != nil {
-		respondWithError(w, 500, "error passing max memory", err)
+		respondWithError(w, 500, "error passing max memory\n", err)
 		return 
 	}
 
@@ -58,7 +58,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// defer closing  the file with os.File.Close
 	file, header, err := r.FormFile("video")
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
+		respondWithError(w, http.StatusBadRequest, "Unable to parse form file\n", err)
 		return
 	}
 	defer file.Close()
@@ -68,18 +68,18 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// use mime.ParseMediaType and "video/mp4" as MIME type
 	mediaType := header.Header.Get("Content-Type")
 	if mediaType == "" {
-		respondWithError(w, http.StatusBadRequest, "Unable to get mediaType", nil)
+		respondWithError(w, http.StatusBadRequest, "Unable to get mediaType\n", nil)
 		return
 	}
 
 	mediaContentType, _, err := mime.ParseMediaType(mediaType)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid Media Type", nil)
+		respondWithError(w, http.StatusBadRequest, "Invalid Media Type\n", nil)
 		return
 	}
 
 	if mediaContentType != "video/mp4" {
-		respondWithError(w, http.StatusBadRequest, "Content is not an image", nil)
+		respondWithError(w, http.StatusBadRequest, "Content is not an image\n", nil)
 		return
 	}
 
@@ -88,7 +88,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// if user is not video owner return http.StatusUnauthoized
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unablle to get video from db", err)
+		respondWithError(w, http.StatusInternalServerError, "Unablle to get video from db\n", err)
 		return
 	}
 
@@ -97,38 +97,42 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-
 	// 7 - Save the uploaded file as a temporay file on dis 
 	tempFile, err := os.CreateTemp("", "tubely-upload.mp4")
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't create temporary file: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create temporary file: %v\n", err)
 		return
 	}
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
+	
+
 	_, err = io.Copy(tempFile, file)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't save temp file: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't save temp file: %v\n", err)
 		return
 	}
-
 
 	// 8 - Reset tempFiles file pointer to begenning with .Seek(0, io.SeekStart) to allow us to read file from beginning
 	_, err = tempFile.Seek(0, io.SeekStart)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't reset the temp file: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't reset the temp file: %v\n", err)
 		return
 	}
+	
 
-	fileName := tempFile.Name()
-	fmt.Printf("Filename: %v", fileName)
+	fileName, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to process video mov atom: %v\n", err)
+	}
+	fmt.Printf("Filename processed: %v", fileName)
 
 	aspectRatio, err := getVideoAspectRatio(fileName)
 	fmt.Printf("Aspect ratio: %v", aspectRatio)
 
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v\n", err)
 		return
 	}
 
@@ -138,12 +142,18 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	} else if aspectRatio == "9:16" {
 		orientation = "portrait"
 	}
+
+	processedFile, err := os.Open(fileName)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error opening processed file: %v\n", err)
+	}
+	defer processedFile.Close()
 	
 	// 9 - Put object into S3 using PutObject 
 	randomBytes := make([]byte, 16)
 	_, err = rand.Read(randomBytes)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random bytes: %v\n", err)
 		return
 	}
 	fileKey := fmt.Sprintf("%v/%x.mp4", orientation, randomBytes)
@@ -151,13 +161,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	putObject := &s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
 		Key: &fileKey,
-		Body: tempFile,
+		Body: processedFile,
 		ContentType: &mediaContentType,
 	}
 
 	_, err = cfg.s3Client.PutObject(context.Background(), putObject)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldnt upload file to s3: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldnt upload file to s3: %v\n", err)
 		return
 	}
 	
@@ -169,7 +179,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	video.VideoURL = &s3URL
 	err = cfg.db.UpdateVideo(video) 
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't update video url: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't update video url: %v\n", err)
 		return
 	}
 
@@ -196,16 +206,14 @@ func getVideoAspectRatio(filePath string) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		log.Fatalf("Error running command!: %v", err)
+		log.Fatalf("Error running command!: %v\n", err)
 	}
-
-	fmt.Printf("Buffer: %v", buffer)
 
 	var output FFProbeOutput 
 
 	err = json.Unmarshal(buffer.Bytes(), &output)
 	if err != nil {
-		log.Fatalf("Error unmarshalling json data: %v", err)
+		log.Fatalf("Error unmarshalling json data: %v\n", err)
 	}
 
 	width := output.Streams[0].Width 
@@ -222,4 +230,23 @@ func getVideoAspectRatio(filePath string) (string, error) {
 		return "9:16", nil
 	}
 	return "other", nil
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	// Create a new string for output path (append .process to input)
+		// this should be the path to the temp file on disk 
+	outputPath := filePath + ".processing"
+		// Create a new exec.Cmd command 
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputPath)
+	fmt.Printf("Command: %v", cmd) 
+
+	// Run the command 
+	err := cmd.Run()
+	if err != nil {
+		log.Fatalf("Error running command: %v\n", err)
+		return "", err
+	}
+	// return the output file path 
+	fmt.Printf("Output path being returned %v\n", outputPath)
+	return outputPath, nil
 }
