@@ -84,10 +84,22 @@ func main() {
 		log.Fatal("PORT environment variable is not set")
 	}
 
+
+	awsCfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithRegion(s3Region),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	client := s3.NewFromConfig(awsCfg)
+
 	cfg := apiConfig{
 		db:               db,
 		jwtSecret:        jwtSecret,
 		platform:         platform,
+		s3Client: 				client,
 		filepathRoot:     filepathRoot,
 		assetsRoot:       assetsRoot,
 		s3Bucket:         s3Bucket,
@@ -100,16 +112,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Couldn't create assets directory: %v", err)
 	}
-
-	awsCfg, err := config.LoadDefaultConfig(
-		context.Background(),
-		config.WithRegion(cfg.s3Region),
-	)
-	if err != nil {
-		log.Fatal("Unable to load SDK config: %v", err)
-	}
-
-	cfg.s3Client = s3.NewFromConfig(awsCfg)
 
 	mux := http.NewServeMux()
 	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
@@ -128,8 +130,8 @@ func main() {
 	mux.HandleFunc("POST /api/thumbnail_upload/{videoID}", cfg.handlerUploadThumbnail)
 	mux.HandleFunc("POST /api/video_upload/{videoID}", cfg.handlerUploadVideo)
 	mux.HandleFunc("GET /api/videos", cfg.handlerVideosRetrieve)
-	mux.HandleFunc("DELETE /api/videos/{videoID}", cfg.handlerVideoMetaDelete)
 	mux.HandleFunc("GET /api/videos/{videoID}", cfg.handlerVideoGet)
+	mux.HandleFunc("DELETE /api/videos/{videoID}", cfg.handlerVideoMetaDelete)
 
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 
