@@ -250,3 +250,4 @@ func processVideoForFastStart(filePath string) (string, error) {
 	fmt.Printf("Output path being returned %v\n", outputPath)
 	return outputPath, nil
 }
+
