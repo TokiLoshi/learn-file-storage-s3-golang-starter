@@ -27,7 +27,6 @@ type apiConfig struct {
 	s3CfDistribution string
 	port             string
 	s3Client				*s3.Client
-
 }
 
 
@@ -83,7 +82,6 @@ func main() {
 	if port == "" {
 		log.Fatal("PORT environment variable is not set")
 	}
-
 
 	awsCfg, err := config.LoadDefaultConfig(
 		context.Background(),
